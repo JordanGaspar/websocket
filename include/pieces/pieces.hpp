@@ -546,7 +546,11 @@ public:
 private:
   enum control_t { read, close, done };
 
-  control_t unpack() {
+  std::string read() {
+
+    std::string buffer(0, 1024);
+
+    stream_.read(&buffer);
 
     enum opcode_t {
       continuation = 0x0,
@@ -557,20 +561,20 @@ private:
       pong = 0x10
     };
 
-    bool fin = read_buffer[0] & 0b10000000;
-    opcode_t opcode = read_buffer[0] & 0b00001111;
-    bool mask = read_buffer[1] & 0b10000000;
-    std::size_t len = read_buffer[1] & 0b01111111;
+    bool fin = buffer[0] & 0b10000000;
+    opcode_t opcode = buffer[0] & 0b00001111;
+    bool mask = buffer[1] & 0b10000000;
+    std::size_t len = buffer[1] & 0b01111111;
     std::size_t last_byte = 2;
 
     if (len == 126) {
-      len = *reinterpret_cast<uint16_t *>(read_buffer[2]);
+      len = *reinterpret_cast<uint16_t *>(buffer[2]);
 
       last_byte = 4;
     }
 
     if (len == 127) {
-      uint64_t tmp = *reinterpret_cast<uint64_t *>(read_buffer[2]);
+      uint64_t tmp = *reinterpret_cast<uint64_t *>(buffer[2]);
 
       if (tmp & 0x8000000000000000) {
         return false;
@@ -581,10 +585,14 @@ private:
       len = tmp;
     }
 
-    char *payload = &read_buffer[last_byte + 4];
+    if (len < buffer.size()){
+	    std::string tmp(
+    }
+
+    char *payload = &buffer[last_byte + 4];
 
     if (mask) {
-      char *mask_key = &read_buffer[last_byte];
+      char *mask_key = &buffer[last_byte];
 
       for (int i = 0; i < len; i++) {
         payload[i] ^= mask_key[i % 4];
@@ -636,9 +644,6 @@ private:
 
     stream_.write(response);
   }
-
-  std::string read_buffer;
-  std::string write_buffer;
 
   Tp &stream_;
 };
