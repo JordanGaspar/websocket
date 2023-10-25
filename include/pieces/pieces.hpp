@@ -1,5 +1,6 @@
 #ifndef PIECES_HPP_
 #define PIECES_HPP_
+#include <atomic>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
@@ -170,18 +171,22 @@ template <typename Tp = sockaddr_in6, typename Pp = uint16_t> class server {
 public:
   //! Public type context_t with three fields:
   //! fd for file descriptor, addr to the address
-  //! structure and len to the addr size.
+  //! structure and len to the addr size; and a 
+  //! method to close context after fork().
   struct context_t {
     int fd;
     Tp addr;
     socklen_t len;
+
+    //! Method to free context_t object after fork.
+    void free(){
+      close(fd);
+    }
   };
 
   //! Sigint handler to close the main file descriptor.
   static void sigint_handler(int sig){
     if (sig == SIGINT){
-      close(fd);
-      usleep(500);
       exit(EXIT_SUCCESS);
     }
   }
@@ -190,7 +195,7 @@ public:
   //! obteined with server::get_fid() method after the construction.
   //! It receives port or path as argument. The default configuration
   //! is to run an ipv6 tcp file descriptor.
-  server(Pp port_path) {
+  server(Pp port_path) : alive{std::make_shared<bool>(false)}{
     int ec = 0;
  
     address_t addr;
@@ -218,13 +223,23 @@ public:
     close(get_fd());
   }
 
+  //! Check if connection still alive.
+  bool connection_alive(){
+    return alive.load().get();
+  }
+
+  //! Stop acceptor loop thread.
+  void stop(){
+    *(alive.load()) = false;
+  }
+
   //! Function that accepts new connections in async mode.
   //! It put the accepted socket into the safe queue to be
   //! consumed by the consumer thread.
   void sync_acceptor() {
 
     std::thread thrd([&]() {
-      for (;;) {
+      while (connection_alive()) {
         context_t ctx;
 
         ctx.fd =
@@ -321,13 +336,9 @@ private:
   };
 
   //! The file descriptor to be stored by the server class.
-  static int fd;
+  int fd;
+  std::atomic<std::shared_ptr<bool>> alive;
 };
-
-//! The file descriptor need to be in global scope to be closed 
-//! by sigint handler.
-template<typename Tp, typename Pp>
-int server<Tp, Pp>::fd = 0;
 
 //! The typename to represent ipv6 tcp server.
 typedef server<> ipv6_tcp_server;

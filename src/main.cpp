@@ -31,6 +31,7 @@ SOFTWARE.
 #include <bitset>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -42,53 +43,51 @@ SOFTWARE.
 #include <unistd.h>
 #include <vector>
 
-void websocket(pieces::ipv6_tcp_server &server, pieces::ssl &ssl) {
+void client(pieces::ssl::stream &&s) {
+  try {
 
-  auto callback = [&]() {
-    for (;;) {
+    pieces::websocket<decltype(s)> wss(s);
 
-      auto ctx = server.get_context();
-
-      try {
-        auto s = ssl.new_stream(ctx.fd);
-
-        pieces::websocket<decltype(s)> wss(s);
-
-        while (wss.connection_alive()) {
-          auto opt = wss.read();
-          if (opt.has_value()) {
-            std::cout << "Received: " << opt.value() << std::endl;
-          }
-        }
-
-        if (!wss.connection_alive()) {
-          std::cout << "connection close" << std::endl;
-        }
-
-      } catch (std::exception &ec) {
-        std::cerr << ec.what() << std::endl;
+    while (wss.connection_alive()) {
+      auto opt = wss.read();
+      if (opt.has_value()) {
+        std::cout << "Received: " << opt.value() << std::endl;
       }
     }
-  };
 
-  for (int i = 0; i < 10; i++) {
-    std::thread thrd(callback);
-    thrd.detach();
+  } catch (std::exception &ec) {
+    std::cerr << ec.what() << std::endl;
   }
+}
 
-  callback();
+void websocket(std::shared_ptr<pieces::ipv6_tcp_server> server,
+               std::shared_ptr<pieces::ssl> ssl) {
+
+  for (;;) {
+    auto ctx = server->get_context();
+
+    if (fork() == 0) {
+      server->stop();
+      server.reset();
+      return client(ssl->new_stream(ctx.fd));
+    }
+
+    ctx.free();
+  }
 }
 
 int main() {
   try {
-    pieces::ipv6_tcp_server server(4433);
 
-    server.sync_acceptor();
+    auto server = std::make_shared<pieces::ipv6_tcp_server>(4433);
 
-    pieces::ssl ssl("/etc/ssl/localcerts/apache.pem",
-                    "/etc/ssl/localcerts/apache.key");
+    server->sync_acceptor();
 
-    websocket(server, ssl);
+    auto ssl = std::make_shared<pieces::ssl>("/etc/ssl/localcerts/apache.pem",
+                                             "/etc/ssl/localcerts/apache.key");
+
+    websocket(std::move(server), std::move(ssl));
+
   } catch (std::exception &ec) {
     std::cerr << ec.what() << std::endl;
   }
