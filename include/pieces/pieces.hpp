@@ -727,6 +727,9 @@ private:
       for (int i = 0; i < len; i++) {
         payload[i] ^= mask_key[i % 4];
       }
+    } else {
+      connection_alive(false);
+      return std::nullopt;
     }
 
     switch (opcode) {
