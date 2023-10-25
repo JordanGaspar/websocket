@@ -2,6 +2,7 @@
 #define PIECES_HPP_
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <sstream>
 /*! Pieces library */
 
@@ -180,6 +181,7 @@ public:
   static void sigint_handler(int sig){
     if (sig == SIGINT){
       close(fd);
+      usleep(500);
       exit(EXIT_SUCCESS);
     }
   }
@@ -426,24 +428,76 @@ public:
     }
 
   public:
-    //! write function of stream object with string argument.
+    //! write function of stream object with string argument. Return
+    //! the number of wrote elements, zero for error and -1 when you
+    //! should retry the write.
     int write(const std::string &buffer) {
-      return SSL_write(s, buffer.data(), buffer.size());
+      int ec = 0;
+
+      if ((ec = SSL_write(s, buffer.data(), buffer.size())) <= 0) {
+        switch (SSL_get_error(s, ec)) {
+        case SSL_ERROR_WANT_WRITE:
+          return -1;
+        default:
+          return 0;
+        }
+      }
+
+      return ec;
     }
 
-    //! write function of stream object with vector argument.
+    //! write function of stream object with vector argument. Return
+    //! the number of wrote elements, zero for error and -1 when you
+    //! should retry the write.
     int write(const std::vector<char> &buffer) {
-      return SSL_write(s, buffer.data(), buffer.size());
+      int ec = 0;
+
+      if ((ec = SSL_write(s, buffer.data(), buffer.size())) <= 0) {
+        switch (SSL_get_error(s, ec)) {
+        case SSL_ERROR_WANT_WRITE:
+          return -1;
+        default:
+          return 0;
+        }
+      }
+
+      return ec;
     }
 
-    //! read function of stream object with string argument.
+    //! read function of stream object with string argument. Return
+    //! the number of read elements, zero for error and -1 when you
+    //! should retry the read.
     int read(std::string *buffer) {
-      return SSL_read(s, buffer->data(), buffer->size());
+      int ec = 0;
+
+      if ((ec = SSL_read(s, buffer->data(), buffer->size())) <= 0) {
+        switch (SSL_get_error(s, ec)) {
+        case SSL_ERROR_WANT_READ:
+          return -1;
+        default:
+          return 0;
+        }
+      }
+
+      return ec;
     }
 
-    //! read function of stream object with vector argument.
+    //! read function of stream object with vector argument. Return
+    //! the number of read elements, zero for error and -1 when you
+    //! should retry the read.
     int read(std::vector<char> *buffer) {
-      return SSL_read(s, buffer->data(), buffer->size());
+      int ec = 0;
+
+      if ((ec = SSL_read(s, buffer->data(), buffer->size())) <= 0) {
+        switch (SSL_get_error(s, ec)) {
+        case SSL_ERROR_WANT_READ:
+          return -1;
+        default:
+          return 0;
+        }
+      }
+
+      return ec;
     }
 
     //! The stream destructor that destroys the client connection and
@@ -494,24 +548,21 @@ public:
   //! A normal destructor that calls free function.
   ~ssl() { SSL_CTX_free(ssl_ctx); }
 
-  //! This is the stream factory function. Only ssl has 
-  //! The ability to call stream constructor because it's 
+  //! This is the stream factory function. Only ssl has
+  //! The ability to call stream constructor because it's
   //! Protected. So we need this method for the criation.
   stream new_stream(int fd) { return stream(ssl_ctx, fd); }
 
-  //! This function returns if this ssl connection has wss alpn 
+  //! This function returns if this ssl connection has wss alpn
   //! support.
-  bool get_wss_alpn(){
-    return WSS_ALPN;
-  }
+  bool get_wss_alpn() { return WSS_ALPN; }
 
 private:
   SSL_CTX *ssl_ctx;
   bool WSS_ALPN;
 };
 
-
-//! Concept of a object that has 'int read(std::string*)' 
+//! Concept of a object that has 'int read(std::string*)'
 //! function and 'int write(const std::string&)' function.
 template <typename Tp>
 concept HasReadAndWrite = requires(Tp t, std::string *i) {
@@ -521,9 +572,9 @@ concept HasReadAndWrite = requires(Tp t, std::string *i) {
 };
 
 //! Concept to verify if it's a function with SSL properties.
-template<typename Tp>
+template <typename Tp>
 concept HasALPN = requires(Tp t) {
-  {t.get_wss_alpn()} -> std::same_as<bool>; 
+  { t.get_wss_alpn() } -> std::same_as<bool>;
 };
 
 //! Template class websocket with HasReadAndWrite constraint.
@@ -543,14 +594,22 @@ public:
     }
   }
 
-private:
-  enum control_t { read, close, done };
+  //! Read on a websocket stream and return an optional 
+  //! pair with the string content and bool indicating if 
+  //! it was done (true) or not (false).
+  std::optional<std::pair<std::string, bool>> read() {
 
-  std::string read() {
+    std::string buffer(1024, 0);
 
-    std::string buffer(0, 1024);
+    int sz = 0;
 
-    stream_.read(&buffer);
+    while ((sz = stream_.read(&buffer)) == -1) {
+      if (sz == 0){
+        return std::nullopt;
+      }
+    }
+
+    buffer.resize(sz);
 
     enum opcode_t {
       continuation = 0x0,
@@ -562,13 +621,13 @@ private:
     };
 
     bool fin = buffer[0] & 0b10000000;
-    opcode_t opcode = buffer[0] & 0b00001111;
+    int opcode = buffer[0] & 0b00001111;
     bool mask = buffer[1] & 0b10000000;
     std::size_t len = buffer[1] & 0b01111111;
     std::size_t last_byte = 2;
 
     if (len == 126) {
-      len = *reinterpret_cast<uint16_t *>(buffer[2]);
+      len += *reinterpret_cast<uint16_t *>(buffer[2]);
 
       last_byte = 4;
     }
@@ -577,16 +636,25 @@ private:
       uint64_t tmp = *reinterpret_cast<uint64_t *>(buffer[2]);
 
       if (tmp & 0x8000000000000000) {
-        return false;
+        return std::nullopt;
       }
 
       last_byte = 10;
 
-      len = tmp;
+      len += tmp;
     }
 
-    if (len < buffer.size()){
-	    std::string tmp(
+    while ((len + (last_byte + 4)) < buffer.size()) {
+      std::string tmp(1024, 0);
+
+      while ((sz = stream_.read(&tmp)) == -1) {
+        if (sz == 0) {
+          return std::nullopt;
+        }
+      }
+
+      tmp.resize(sz);
+      buffer += tmp;
     }
 
     char *payload = &buffer[last_byte + 4];
@@ -599,10 +667,31 @@ private:
       }
     }
 
-    return true;
+    switch (opcode) {
+    case ping:
+      buffer[0] &= (0b10000000 | 0xA); // set fin and pong
+      buffer[1] &= 0b01111111;         // set unmask
+      while (stream_.write(buffer) == -1) {
+      }
+      return std::nullopt;
+
+    case close: {
+      std::string close(2, 0);
+      close[0] &= (0b10000000 | 0x8); // set fin and close
+      while (stream_.write(close) == -1) {
+      }
+      return std::nullopt;
+    }
+
+    case pong:
+      return std::nullopt;
+    }
+
+    return std::optional<std::pair<std::string, bool>>(
+        {buffer.substr(last_byte + 4), fin});
   }
 
-  void pack();
+  void write(const std::string &);
 
   //! The non-complient handshake procedure. This private
   //! method only reads the Sec-WebSocket-Key propertie and
@@ -620,12 +709,21 @@ private:
     std::string error("websocket error");
     std::string error_response("HTTP/1.1 400 Bad Request\r\n\r\n");
 
-    stream_.read(&buffer);
+    int ec = 0;
+
+    while ((ec = stream_.read(&buffer)) == -1) {
+      if (ec == 0) {
+        while (stream_.write(error_response) == -1)
+          ;
+        throw std::runtime_error(error);
+      }
+    }
 
     auto start = buffer.find(pattern);
 
     if (start == std::string::npos) {
-      stream_.write(error_response);
+      while (stream_.write(error_response) == -1)
+        ;
       throw std::runtime_error(error);
     }
 
@@ -642,7 +740,11 @@ private:
 
     response += base64 + end;
 
-    stream_.write(response);
+    while ((ec = stream_.write(response)) == -1) {
+      if (ec == 0) {
+        throw std::runtime_error(error);
+      }
+    }
   }
 
   Tp &stream_;

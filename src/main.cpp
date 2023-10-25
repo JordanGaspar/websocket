@@ -14,21 +14,10 @@
 
 void websocket(pieces::ipv6_tcp_server &server, pieces::ssl &ssl) {
 
-	struct internal_t{
-		pieces::ipv6_tcp_server::context_t context;
-		std::string buffer;
-	};
-
   auto callback = [&]() {
-    std::queue<std::pair<pieces::ipv6_tcp_server::context_t, std::string>>
-        internal_queue;
-
     for (;;) {
 
-      if (internal_queue.empty()) {
-        auto ctx = server.get_context();
-		internal_queue.emplace({ctx, })
-      }
+      auto ctx = server.get_context();
 
       try {
         auto s = ssl.new_stream(ctx.fd);
@@ -36,12 +25,19 @@ void websocket(pieces::ipv6_tcp_server &server, pieces::ssl &ssl) {
         pieces::websocket<decltype(s)> wss(s);
 
         while (true) {
-          std::string buffer(8192, 0);
-          s.read(&buffer);
 
-          // wss.read(reinterpret_cast<uint8_t*>(buffer.data()), buffer.size());
+          bool fin = false;
+
+          while (!fin){
+            auto opt = wss.read();
+            auto [str, fin] = opt.value();
+            std::cout << str << std::endl;
+          }
+
         }
+
       } catch (std::exception &ec) {
+        std::cerr << ec.what() << std::endl;
       }
     }
   };
@@ -55,14 +51,8 @@ void websocket(pieces::ipv6_tcp_server &server, pieces::ssl &ssl) {
 }
 
 int main() {
-  /*
-  blocks on queue is optional
-  there are queue nonblocking
-  blocks to get on queue
-  blocks to poll
-  */
   try {
-    pieces::ipv6_tcp_server server(443);
+    pieces::ipv6_tcp_server server(4433);
 
     server.sync_acceptor();
 
@@ -71,6 +61,7 @@ int main() {
 
     websocket(server, ssl);
   } catch (std::exception &ec) {
+    std::cerr << ec.what() << std::endl;
   }
 
   return 0;
