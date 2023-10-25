@@ -404,6 +404,12 @@ public:
     SSL *s;
     int fd_;
     bool graceful;
+    bool alive;
+
+    //! Set when the stream was detected as closed.
+    void set_not_alive(){
+      alive = false;
+    };
 
   public:
     //! ssl is a friend class of stream because only ssl can create streams.
@@ -411,7 +417,7 @@ public:
 
   protected:
     //! streams are only created by ssl object, so protected member.
-    stream(SSL_CTX *ssl_ctx, int fd) : fd_{fd}, graceful(false) {
+    stream(SSL_CTX *ssl_ctx, int fd) : fd_{fd}, graceful(false), alive{true} {
       s = SSL_new(ssl_ctx);
 
       if (s == NULL) {
@@ -428,6 +434,11 @@ public:
     }
 
   public:
+    //! Get if the stream still alive.
+    bool get_alive(){
+      return alive;
+    }
+
     //! write function of stream object with string argument. Return
     //! the number of wrote elements, zero for error and -1 when you
     //! should retry the write.
@@ -439,6 +450,7 @@ public:
         case SSL_ERROR_WANT_WRITE:
           return -1;
         default:
+          set_not_alive();
           return 0;
         }
       }
@@ -457,6 +469,7 @@ public:
         case SSL_ERROR_WANT_WRITE:
           return -1;
         default:
+          set_not_alive();
           return 0;
         }
       }
@@ -475,6 +488,7 @@ public:
         case SSL_ERROR_WANT_READ:
           return -1;
         default:
+          set_not_alive();
           return 0;
         }
       }
@@ -493,6 +507,7 @@ public:
         case SSL_ERROR_WANT_READ:
           return -1;
         default:
+          set_not_alive();
           return 0;
         }
       }
@@ -521,7 +536,7 @@ public:
 
     //! Copy constructor that duplicate ssl s object.
     stream(const stream &strm)
-        : s{SSL_dup(strm.s)}, fd_{strm.fd_}, graceful{strm.graceful} {
+        : s{SSL_dup(strm.s)}, fd_{strm.fd_}, graceful{strm.graceful}, alive(strm.alive) {
       if (s == NULL) {
         throw std::runtime_error("ssl duplication error");
       }
@@ -569,7 +584,7 @@ concept HasReadAndWrite = requires(Tp t, std::string *i) {
   { t.read(i) } -> std::same_as<int>;
 } && requires(Tp t, const std::string &j) {
   { t.write(j) } -> std::same_as<int>;
-};
+} && requires(Tp t) {{ t.get_alive()} -> std::same_as<bool>;};
 
 //! Concept to verify if it's a function with SSL properties.
 template <typename Tp>
@@ -580,11 +595,11 @@ concept HasALPN = requires(Tp t) {
 //! Template class websocket with HasReadAndWrite constraint.
 template <HasReadAndWrite Tp = ipv6_tcp_server> class websocket {
 public:
-  //! This constructor makes a non-complient handshake.
+  //! This constructor makes a non-compliant handshake.
   //! It only checks for the Sec-WebSocket-Key and returns
   //! the Sec-WebSocket-Accept. This server is thinked to
   //! use alpn in the future.
-  websocket(Tp &stream) : stream_{stream} {
+  websocket(Tp &stream) : stream_{stream}, alive{true} {
     if constexpr (HasALPN<Tp>) {
       if (!stream_.get_wss_alpn()) {
         http_handshake();
@@ -594,17 +609,52 @@ public:
     }
   }
 
-  //! Read on a websocket stream and return an optional 
-  //! pair with the string content and bool indicating if 
+  //! Get if websocket connection still alive.
+  bool connection_alive() { return alive; }
+
+  //! Public read websocket function. It reads
+  //! the websocket getting all continue frames.
+  //! If success it returns the payload content
+  //! or std::nullopt in case of error. When
+  //! connection was closed, connection_alive()
+  //! returns false.
+  std::optional<std::string> read() {
+
+    std::string buffer;
+
+    bool fin = false;
+
+    while (!fin && connection_alive()) {
+      auto opt = m_read();
+
+      if (opt.has_value()) {
+        auto [str, key] = opt.value();
+        fin = key;
+        buffer += str;
+      } else {
+        return std::nullopt;
+      }
+    }
+
+    return buffer;
+  }
+
+private:
+  //! Set websocket connection state.
+  void connection_alive(bool state) { alive = state; }
+
+  //! Read on a websocket stream and return an optional
+  //! pair with the string content and bool indicating if
   //! it was done (true) or not (false).
-  std::optional<std::pair<std::string, bool>> read() {
+  std::optional<std::pair<std::string, bool>> m_read() {
 
     std::string buffer(1024, 0);
 
     int sz = 0;
 
-    while ((sz = stream_.read(&buffer)) == -1) {
-      if (sz == 0){
+    while ((sz = stream_.read(&buffer)) <= 0) {
+      if (sz == 0) {
+        connection_alive(stream_.get_alive());
         return std::nullopt;
       }
     }
@@ -647,8 +697,9 @@ public:
     while ((len + (last_byte + 4)) < buffer.size()) {
       std::string tmp(1024, 0);
 
-      while ((sz = stream_.read(&tmp)) == -1) {
+      while ((sz = stream_.read(&tmp)) <= 0) {
         if (sz == 0) {
+          connection_alive(stream_.get_alive());
           return std::nullopt;
         }
       }
@@ -671,15 +722,16 @@ public:
     case ping:
       buffer[0] &= (0b10000000 | 0xA); // set fin and pong
       buffer[1] &= 0b01111111;         // set unmask
-      while (stream_.write(buffer) == -1) {
+      while (stream_.write(buffer) <= 0) {
       }
       return std::nullopt;
 
     case close: {
       std::string close(2, 0);
       close[0] &= (0b10000000 | 0x8); // set fin and close
-      while (stream_.write(close) == -1) {
+      while (stream_.write(close) <= 0) {
       }
+      connection_alive(false);
       return std::nullopt;
     }
 
@@ -748,6 +800,7 @@ public:
   }
 
   Tp &stream_;
+  bool alive;
 };
 
 }; // namespace pieces
