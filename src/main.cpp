@@ -1,11 +1,4 @@
-/*! Pieces library */
-
-/*!
-Author: Jordan Gaspar Alves Silva.
-Year: 2023
-E-mail: jordangaspar@gmail.com
-
-MIT License
+/*MIT License
 
 Copyright (c) 2023 Jordan Gaspar Alves Silva
 
@@ -26,6 +19,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Author: Jordan Gaspar Alves Silva.
+Year: 2023
+E-mail: jordangaspar@gmail.com
+Library name: pieces.
 */
 
 #include <bitset>
