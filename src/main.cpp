@@ -26,20 +26,10 @@ E-mail: jordangaspar@gmail.com
 Library name: pieces.
 */
 
-#include <bitset>
-#include <chrono>
-#include <csignal>
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <memory>
 #include <pieces.hpp>
-#include <queue>
-#include <sstream>
-#include <string>
-#include <thread>
 #include <unistd.h>
-#include <vector>
 
 void client(pieces::ssl::stream &&s) {
   try {

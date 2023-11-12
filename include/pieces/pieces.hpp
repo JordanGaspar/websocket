@@ -30,20 +30,15 @@ Library name: pieces.
 #define PIECES_HPP_
 #include <atomic>
 #include <cstdlib>
-#include <iostream>
 #include <optional>
-#include <sstream>
 #include <bits/types/FILE.h>
 #include <condition_variable>
 #include <cstddef>
-#include <functional>
-#include <list>
 #include <netinet/in.h>
 #include <openssl/crypto.h>
 #include <openssl/prov_ssl.h>
 #include <openssl/ssl.h>
 #include <queue>
-#include <ranges>
 #include <shared_mutex>
 #include <stdexcept>
 #include <sys/socket.h>
@@ -53,7 +48,6 @@ Library name: pieces.
 #include <memory>
 #include <algorithm>
 #include <cstring>
-#include <span>
 #include <unistd.h>
 
 namespace pieces {
@@ -810,6 +804,8 @@ private:
       }
     }
   }
+
+  void test();
 
   Tp &stream_;
   bool alive;
